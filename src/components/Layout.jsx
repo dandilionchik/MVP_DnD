@@ -31,7 +31,7 @@ const roleConfig = {
   },
   dm: {
     title: "Мастер",
-    subtitle: "Мир, сюжетное проектирование и аналитика",
+    subtitle: "Мир, сессии и аналитика",
     accent: "from-red-950/40 via-wine/50 to-amber-900/20",
     icon: WandSparkles,
     nav: [
@@ -115,7 +115,7 @@ function Sidebar({ config, activePage, onPageChange }) {
                     isActive ? "scale-110 text-amber-300" : "group-hover:scale-105"
                   }`}
                 />
-                <span className="text-sm">{item.label}</span>
+                <span className="min-w-0 break-words text-sm">{item.label}</span>
               </button>
             );
           })}
@@ -186,7 +186,7 @@ function TopBar({
                 <p className="text-sm text-stone-400">
                   {role === "player"
                     ? "Все кампании, персонажи и игровые знания собраны в одном месте."
-                    : "Управляйте миром, сессиями и структурой кампаний из единого центра."}
+                    : "Управляйте миром, мастерской сюжета и структурой кампаний из единого центра."}
                 </p>
               </div>
             </div>

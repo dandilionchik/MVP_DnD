@@ -2,16 +2,27 @@ import { useMemo, useState } from "react";
 import {
   BellPlus,
   BookMarked,
+  BookUser,
   BookOpenCheck,
+  CalendarDays,
   ChevronLeft,
   ChevronRight,
+  Clock3,
+  Dices,
+  Eye,
+  EyeOff,
   Filter,
   Link2,
   MapPinned,
+  Milestone,
+  NotebookPen,
   Pin,
   Plus,
+  ScrollText,
   Search,
+  Settings2,
   ShieldPlus,
+  Sparkles,
   Upload,
   UserPlus,
   Users,
@@ -464,24 +475,427 @@ const emptyWizard = () => ({
   backgroundPreset: BACKGROUND_PRESETS[0],
   backgroundPrompt: "",
   generatedStory: BACKGROUND_PRESETS[0],
+  backgroundDetails: null,
+  hpPreview: 0,
+  hpRolls: [],
 });
 
+const PLAYER_DASHBOARD_BLOCKS = {
+  spotlight: true,
+  campaigns: true,
+  pinned: true,
+  updates: true,
+  recommendations: true,
+  party: true,
+};
+
+const DM_DASHBOARD_BLOCKS = {
+  overview: true,
+  campaigns: true,
+  pinned: true,
+  activity: true,
+};
+
+const SKILL_ALIASES = {
+  athletics: "Атлетика",
+  acrobatics: "Акробатика",
+  perception: "Восприятие",
+  survival: "Выживание",
+  performance: "Выступление",
+  intimidation: "Запугивание",
+  history: "История",
+  sleightOfHand: "Ловкость рук",
+  sleight_of_hand: "Ловкость рук",
+  medicine: "Медицина",
+  deception: "Обман",
+  animalHandling: "Обращение с животными",
+  animal_handling: "Обращение с животными",
+  nature: "Природа",
+  insight: "Проницательность",
+  investigation: "Расследование",
+  religion: "Религия",
+  stealth: "Скрытность",
+  arcana: "Тайная магия",
+  persuasion: "Убеждение",
+};
+
+const SKILL_ORDER = [
+  "Акробатика",
+  "Атлетика",
+  "Восприятие",
+  "Выживание",
+  "Выступление",
+  "Запугивание",
+  "История",
+  "Ловкость рук",
+  "Медицина",
+  "Обман",
+  "Обращение с животными",
+  "Природа",
+  "Проницательность",
+  "Расследование",
+  "Религия",
+  "Скрытность",
+  "Тайная магия",
+  "Убеждение",
+];
+
+function normalizeSkillMap(skills = {}) {
+  return Object.entries(skills).reduce((accumulator, [key, value]) => {
+    const normalizedKey = SKILL_ALIASES[key] ?? key;
+    accumulator[normalizedKey] = value;
+    return accumulator;
+  }, {});
+}
+
+function buildCharacterSkills(stats, skills) {
+  return {
+    ...buildFullSkills(stats),
+    ...normalizeSkillMap(skills),
+  };
+}
+
+function makeAvatar(name) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
+
+function splitDateTimeLabel(value) {
+  const [date, time] = value.split(",").map((part) => part.trim());
+  return {
+    date: date || value,
+    time: time || "По расписанию",
+  };
+}
+
+function calculateFixedHitPoints(level, fixedHp, conModifier) {
+  return Math.max(level, level * (fixedHp + conModifier));
+}
+
+function rollD12HitPoints(level, conModifier) {
+  const rolls = Array.from({ length: level }, () => 1 + Math.floor(Math.random() * 12));
+  const total = Math.max(
+    level,
+    rolls.reduce((sum, roll) => sum + roll + conModifier, 0),
+  );
+  return { rolls, total };
+}
+
+function compileBackgroundNarrative(details) {
+  return [
+    details.origin,
+    details.fracture,
+    details.drive,
+    details.secret,
+    details.hook,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function buildMockAiBackground(prompt, fallbackSeed = BACKGROUND_PRESETS[0]) {
+  const source = (prompt || fallbackSeed).replace(/\s+/g, " ").trim();
+  const segments = source
+    .split(/[.!?]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const opening = segments[0] || source;
+  const pivot = segments[1] || "эта история до сих пор не отпускает персонажа";
+  const details = {
+    concept: opening,
+    origin: `Истоки: ${opening}.`,
+    fracture: `Перелом: ${pivot.charAt(0).toUpperCase()}${pivot.slice(1)}.`,
+    drive:
+      "Движущая сила: герой ищет способ вернуть контроль над своей судьбой и превратить прошлую травму в источник решений.",
+    secret:
+      "Скрытый слой: в этой истории есть деталь, которую персонаж открывает не сразу и использует как личный рычаг доверия.",
+    hook:
+      "Крючок для кампании: мастер может вплести в сюжет письмо, союзника, артефакт или слух, который напрямую продолжает эту линию.",
+  };
+
+  return {
+    ...details,
+    narrative: compileBackgroundNarrative(details),
+  };
+}
+
+function createDetailedNpc(npc, campaign, index) {
+  return {
+    ...npc,
+    summary:
+      npc.summary ??
+      `${npc.role} кампании «${campaign.name}», встроенный в текущую арку и повестку ближайших сцен.`,
+    agenda:
+      npc.agenda ??
+      `Продвигает линию «${campaign.storyMoments[index] ?? campaign.nextGoal}» и реагирует на решения игроков.`,
+    hiddenNote:
+      npc.hiddenNote ??
+      (npc.visibility === "hidden" || npc.visibility === "Hidden"
+        ? `У этого NPC есть скрытый мотив, связанный с темой кампании «${campaign.theme}».`
+        : "Игроки уже знают достаточно, чтобы взаимодействовать с этим персонажем открыто."),
+  };
+}
+
+function normalizeTimelineItem(item, index) {
+  return {
+    ...item,
+    visibility: item.visibility ?? (index === 0 ? "visible" : "hidden"),
+  };
+}
+
+function createSceneFromCampaign(campaign, seed, index) {
+  return {
+    id: `scene-${campaign.id}-${index + 1}`,
+    title: seed.title,
+    summary: seed.summary,
+    objective: campaign.storyMoments[index] ?? campaign.nextGoal,
+    location: campaign.locations[index % campaign.locations.length]?.name ?? campaign.mapLabel,
+    status: index === 0 ? "В подготовке" : "Черновик",
+    visibility: index === 0 ? "visible" : "hidden",
+    hiddenNote:
+      campaign.campaignNotes[index] ??
+      "Скрытая подводка для мастера: что раскрыть в сцене и что пока держать за кадром.",
+  };
+}
+
+function buildPlotThreads(campaign) {
+  return [
+    {
+      id: `thread-${campaign.id}-core`,
+      name: "Основная сюжетная нить",
+      summary: campaign.nextGoal,
+      stage: "Активна",
+      linkedNodes: [campaign.locations[0]?.name, campaign.npcs[0]?.name].filter(Boolean),
+      visibility: "visible",
+      hiddenNote:
+        campaign.campaignNotes[0] ??
+        "Эта нить удерживает темп кампании и связывает ключевые решения игроков с последствиями.",
+    },
+    {
+      id: `thread-${campaign.id}-tension`,
+      name: "Скрытое напряжение",
+      summary: campaign.storyMoments[1] ?? campaign.summary,
+      stage: "Нарастает",
+      linkedNodes: [campaign.organizations[0]?.name, campaign.npcs[1]?.name].filter(Boolean),
+      visibility: "hidden",
+      hiddenNote:
+        campaign.campaignNotes[1] ??
+        "Скрытая линия раскрывается постепенно через сцены, таймлайн и личные цели NPC.",
+    },
+  ];
+}
+
+function normalizeCampaign(campaign) {
+  const timeline = (campaign.timeline ?? []).map(normalizeTimelineItem);
+  const npcs = (campaign.npcs ?? []).map((npc, index) => createDetailedNpc(npc, campaign, index));
+  const workspaceScenes =
+    campaign.workspaceScenes ??
+    (campaign.sessionHistory ?? []).slice(0, 3).map((session, index) =>
+      createSceneFromCampaign(
+        campaign,
+        {
+          title: session.title,
+          summary: session.summary,
+        },
+        index,
+      ),
+    );
+
+  return {
+    ...campaign,
+    invitedPlayers: campaign.invitedPlayers ?? (campaign.players ?? []).map((player) => player.name),
+    timeline,
+    npcs,
+    workspaceScenes,
+    plotThreads: campaign.plotThreads ?? buildPlotThreads(campaign),
+  };
+}
+
+function normalizeCharacter(character) {
+  const classInfo = DND_CLASSES.find((item) => item.ru === character.className) ?? DND_CLASSES[0];
+  const backgroundDetails =
+    character.backgroundDetails ??
+    buildMockAiBackground(character.background, character.background);
+
+  return {
+    ...character,
+    classDescription: classInfo.description,
+    gender: character.gender ?? "female",
+    languages: character.languages ?? ["Общий", "Эльфийский"],
+    alignment: character.alignment ?? ALIGNMENTS[0].ru,
+    feat: character.feat ?? FEATS[0].name,
+    backgroundDetails,
+    skills: buildCharacterSkills(character.stats, character.skills),
+  };
+}
+
+function buildCampaignFromDraft({
+  id,
+  name,
+  summary,
+  theme,
+  nextSessionTitle,
+  nextSessionDate,
+  invitedPlayers,
+}) {
+  const players = invitedPlayers.map((player, index) => ({
+    id: `draft-player-${id}-${index + 1}`,
+    name: player,
+    avatar: makeAvatar(player),
+    className: "Игрок",
+    status: "Приглашён",
+  }));
+
+  return normalizeCampaign({
+    id,
+    name,
+    status: "Подготовка",
+    summary,
+    theme,
+    nextGoal: "Подготовить первую сцену, связать игроков и запустить стартовый конфликт кампании.",
+    nextSessionDate,
+    nextSessionTitle,
+    mapLabel: `Карта кампании «${name}»`,
+    mapTint: "from-amber-800/40 via-red-900/30 to-stone-950/70",
+    players,
+    updates: [
+      {
+        id: `update-${id}-1`,
+        title: "Кампания создана",
+        time: "Только что",
+        author: "Система",
+      },
+    ],
+    recommendations: [
+      "Добавьте первую сцену и задайте скрытое напряжение для группы.",
+      "Создайте хотя бы одного NPC с открытой и скрытой мотивацией.",
+      "Зафиксируйте стартовый таймлайн, чтобы опираться на него после первой игры.",
+    ],
+    timeline: [
+      {
+        id: `timeline-${id}-1`,
+        date: "Пролог",
+        title: "Точка входа",
+        text: "Игроки знакомятся, получают общий импульс и узнают о первом конфликте кампании.",
+        linkedTo: "Старт новой сюжетной арки",
+        visibility: "visible",
+      },
+    ],
+    storyMoments: [
+      "Группа делает первый общий выбор и определяет тон дальнейших отношений.",
+      "У мастера появляется скрытая линия, которая начнёт давить на игроков после пролога.",
+    ],
+    sessionHistory: [
+      {
+        id: `session-${id}-1`,
+        title: nextSessionTitle,
+        status: "active",
+        date: nextSessionDate,
+        summary: "Черновик первой сессии с опорой на стартовую сцену и состав приглашённых игроков.",
+        log: ["Подготовить стартовую сцену", "Проверить крючки персонажей", "Согласовать ритм первой игры"],
+        actions: ["Открыть мастерскую", "Добавить NPC", "Связать таймлайн"],
+        updates: ["Создан стартовый каркас кампании"],
+      },
+    ],
+    campaignNotes: [
+      "Скрытая заметка: определите, какой выбор игроков изменит тон кампании уже в первой сцене.",
+    ],
+    locations: [
+      { id: `location-${id}-1`, name: "Стартовая локация", tag: "Точка входа", visibility: "visible" },
+    ],
+    npcs: [
+      { id: `npc-${id}-1`, name: "Первый NPC", role: "Связной", visibility: "visible" },
+    ],
+    organizations: [
+      { id: `org-${id}-1`, name: "Ключевая фракция", relation: "Пока нейтральна", visibility: "hidden" },
+    ],
+    relationships: {
+      locations: [{ title: "Стартовая локация", links: ["Первый NPC", "Ключевая фракция"] }],
+      factions: [{ title: "Ключевая фракция", links: ["Стартовая локация", "Группа игроков"] }],
+      secrets: [{ title: "Скрытый мотив", links: ["Первый NPC"] }],
+    },
+    audioInsights: {
+      filename: "new-campaign-brief.ogg",
+      generatedTimeline: ["00:00 — Вступление кампании", "05:20 — Завязка стартовой сцены"],
+      keyEvents: ["Появляется первый конфликт", "Игроки получают общий вектор движения"],
+    },
+    sharedNotes: [{ id: `shared-${id}-1`, title: "Общий стартовый план", owner: "Группа", visibility: "shared" }],
+    activityLog: ["Создана новая кампания и сформирован список приглашённых игроков."],
+    invitationLink: `dndnexus.app/invite/${id}`,
+    invitedPlayers,
+  });
+}
+
+function getWizardHitPoints(wizard, currentClass) {
+  if (wizard.hpMode === "fixed") {
+    return calculateFixedHitPoints(
+      wizard.level,
+      currentClass.fixedHp,
+      calculateModifier(wizard.stats.ВЫН),
+    );
+  }
+
+  const preparedRolls =
+    wizard.hpRolls?.length === wizard.level
+      ? {
+          rolls: wizard.hpRolls,
+          total: Math.max(
+            wizard.level,
+            wizard.hpRolls.reduce(
+              (sum, roll) => sum + roll + calculateModifier(wizard.stats.ВЫН),
+              0,
+            ),
+          ),
+        }
+      : rollD12HitPoints(wizard.level, calculateModifier(wizard.stats.ВЫН));
+
+  return preparedRolls.total;
+}
+
 export default function App() {
+  const createWizardState = (source = emptyWizard()) => {
+    const classInfo = DND_CLASSES.find((item) => item.name === source.classKey) ?? DND_CLASSES[0];
+    const conModifier = calculateModifier(source.stats.ВЫН);
+    const hpRolls =
+      source.hpMode === "random"
+        ? source.hpRolls?.length === source.level
+          ? source.hpRolls
+          : rollD12HitPoints(source.level, conModifier).rolls
+        : [];
+    const hpPreview =
+      source.hpMode === "fixed"
+        ? calculateFixedHitPoints(source.level, classInfo.fixedHp, conModifier)
+        : Math.max(source.level, hpRolls.reduce((sum, roll) => sum + roll + conModifier, 0));
+    const storySource = source.generatedStory || source.backgroundPrompt || source.backgroundPreset;
+
+    return {
+      ...source,
+      className: classInfo.ru,
+      hpRolls,
+      hpPreview,
+      generatedStory: source.generatedStory || source.backgroundPreset,
+      backgroundDetails: buildMockAiBackground(storySource, source.backgroundPreset),
+    };
+  };
+
   const [role, setRole] = useState("player");
   const [activePage, setActivePage] = useState(defaultPageByRole.player);
   const [searchValue, setSearchValue] = useState("");
-  const [characters, setCharacters] = useState(playerCharacters);
-  const [selectedCharacterId, setSelectedCharacterId] = useState(playerCharacters[0].id);
-  const [selectedCampaignId, setSelectedCampaignId] = useState(campaignsData[0].id);
+  const [campaigns, setCampaigns] = useState(() => campaignsData.map(normalizeCampaign));
+  const [characters, setCharacters] = useState(() => playerCharacters.map(normalizeCharacter));
+  const [selectedCharacterId, setSelectedCharacterId] = useState(playerCharacters[0]?.id ?? null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState(campaignsData[0]?.id ?? null);
   const [showWizard, setShowWizard] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
-  const [wizard, setWizard] = useState(emptyWizard);
-  const [dashboardBlocks, setDashboardBlocks] = useState({
-    pinned: true,
-    updates: true,
-    recommendations: true,
-  });
+  const [wizard, setWizard] = useState(() => createWizardState());
+  const [dashboardBlocks, setDashboardBlocks] = useState(PLAYER_DASHBOARD_BLOCKS);
   const [showDashboardControls, setShowDashboardControls] = useState(false);
+  const [dmDashboardBlocks, setDmDashboardBlocks] = useState(DM_DASHBOARD_BLOCKS);
+  const [showDmDashboardControls, setShowDmDashboardControls] = useState(false);
   const [noteCampaignFilter, setNoteCampaignFilter] = useState("all");
   const [selectedRuleId, setSelectedRuleId] = useState(RULE_ARTICLES[0].id);
   const [pinnedIds, setPinnedIds] = useState(["camp-1", "note-2", "rule-glossary-initiative", "char-1"]);
@@ -490,6 +904,15 @@ export default function App() {
   const [sessionMode, setSessionMode] = useState("manual");
   const [sessionFileName, setSessionFileName] = useState("session-archive-08.mp3");
   const [newPlayerNickname, setNewPlayerNickname] = useState("");
+  const [campaignDraftName, setCampaignDraftName] = useState("Новая кампания");
+  const [campaignDraftSummary, setCampaignDraftSummary] = useState(
+    "Точка входа для новой сюжетной арки, игроков и структуры мира.",
+  );
+  const [campaignDraftTheme, setCampaignDraftTheme] = useState(
+    "Политические тайны, опасное путешествие и медленно раскрывающиеся долги прошлого.",
+  );
+  const [campaignDraftSessionTitle, setCampaignDraftSessionTitle] = useState("Сессия 1: Пролог");
+  const [campaignDraftSessionDate, setCampaignDraftSessionDate] = useState("30 апреля, 19:00");
   const [campaignDraftPlayers, setCampaignDraftPlayers] = useState(["Элария", "Бром"]);
   const [sessionEventInput, setSessionEventInput] = useState("");
   const [sessionLogsByCampaign, setSessionLogsByCampaign] = useState(() =>
@@ -504,13 +927,13 @@ export default function App() {
   const [analyticsSessionId, setAnalyticsSessionId] = useState(campaignsData[0].sessionHistory[0].id);
 
   const selectedCampaign =
-    campaignsData.find((campaign) => campaign.id === selectedCampaignId) ?? campaignsData[0];
+    campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? campaigns[0];
   const selectedCharacter =
     characters.find((character) => character.id === selectedCharacterId) ?? characters[0];
   const selectedRule =
     RULE_ARTICLES.find((rule) => rule.id === selectedRuleId) ?? RULE_ARTICLES[0];
   const currentAnalyticsCampaign =
-    campaignsData.find((campaign) => campaign.id === analyticsCampaignId) ?? campaignsData[0];
+    campaigns.find((campaign) => campaign.id === analyticsCampaignId) ?? campaigns[0];
   const currentAnalyticsSession =
     currentAnalyticsCampaign.sessionHistory.find((session) => session.id === analyticsSessionId) ??
     currentAnalyticsCampaign.sessionHistory[0];
@@ -548,7 +971,7 @@ export default function App() {
 
   const pinnedItems = useMemo(() => {
     const allItems = [
-      ...campaignsData.map((campaign) => ({
+      ...campaigns.map((campaign) => ({
         id: campaign.id,
         label: campaign.name,
         meta: campaign.nextSessionTitle,
@@ -574,13 +997,22 @@ export default function App() {
       })),
     ];
     return allItems.filter((item) => pinnedIds.includes(item.id));
-  }, [characters, pinnedIds]);
+  }, [campaigns, characters, pinnedIds]);
 
   const currentClass = DND_CLASSES.find((item) => item.name === wizard.classKey) ?? DND_CLASSES[0];
 
   const handleRoleSwitch = (nextRole) => {
     setRole(nextRole);
     setActivePage(defaultPageByRole[nextRole]);
+    setShowDashboardControls(false);
+    setShowDmDashboardControls(false);
+  };
+
+  const handlePageChange = (page) => {
+    setActivePage(page);
+    if (page === "characters" && characters[0] && !selectedCharacterId) {
+      setSelectedCharacterId(characters[0].id);
+    }
   };
 
   const openCampaignDetail = (campaignId) => {
@@ -595,7 +1027,7 @@ export default function App() {
   };
 
   const openWizard = () => {
-    setWizard(emptyWizard());
+    setWizard(createWizardState());
     setWizardStep(0);
     setShowWizard(true);
   };
@@ -605,66 +1037,104 @@ export default function App() {
     setWizardStep(0);
   };
 
-  const updateWizard = (patch) => setWizard((current) => ({ ...current, ...patch }));
+  const updateWizard = (patch) =>
+    setWizard((current) => createWizardState({ ...current, ...patch }));
 
   const updateWizardStats = (stats) =>
-    setWizard((current) => ({
-      ...current,
-      stats: {
-        ...current.stats,
-        ...stats,
-      },
-    }));
+    setWizard((current) =>
+      createWizardState({
+        ...current,
+        stats: {
+          ...current.stats,
+          ...stats,
+        },
+      }),
+    );
 
   const applyQuickStats = (classKey) => {
     const classInfo = DND_CLASSES.find((item) => item.name === classKey) ?? DND_CLASSES[0];
-    setWizard((current) => ({
-      ...current,
-      classKey,
-      className: classInfo.ru,
-      stats: { ...classInfo.quickStats },
-    }));
+    setWizard((current) =>
+      createWizardState({
+        ...current,
+        classKey,
+        className: classInfo.ru,
+        abilitiesMode: "quick",
+        stats: { ...classInfo.quickStats },
+      }),
+    );
   };
 
   const applyRandomStats = () => {
-    const values = ["СИЛ", "ЛОВ", "ВЫН", "ИНТ", "МДР", "ХАР"].reduce((accumulator, stat) => {
-      accumulator[stat] = 8 + Math.floor(Math.random() * 11);
-      return accumulator;
-    }, {});
-    updateWizardStats(values);
+    const rollScore = () =>
+      Array.from({ length: 4 }, () => 1 + Math.floor(Math.random() * 6))
+        .sort((left, right) => right - left)
+        .slice(0, 3)
+        .reduce((sum, value) => sum + value, 0);
+    const values = ["СИЛ", "ЛОВ", "ВЫН", "ИНТ", "МДР", "ХАР"].reduce(
+      (accumulator, stat) => {
+        accumulator[stat] = rollScore();
+        return accumulator;
+      },
+      {},
+    );
+    updateWizard({ abilitiesMode: "random", stats: values });
   };
 
   const applyManualDistribution = () => {
-    updateWizardStats({ СИЛ: 15, ЛОВ: 14, ВЫН: 13, ИНТ: 12, МДР: 10, ХАР: 8 });
+    updateWizard({
+      abilitiesMode: "manual",
+      stats: { СИЛ: 15, ЛОВ: 14, ВЫН: 13, ИНТ: 12, МДР: 10, ХАР: 8 },
+    });
   };
 
   const randomizeLanguages = () => {
     const shuffled = [...LANGUAGES].sort(() => Math.random() - 0.5).slice(0, 3);
-    updateWizard({ languages: shuffled });
+    updateWizard({ languagesMode: "random", languages: shuffled });
   };
 
   const toggleLanguage = (language) => {
-    setWizard((current) => ({
-      ...current,
-      languages: current.languages.includes(language)
-        ? current.languages.filter((item) => item !== language)
-        : [...current.languages, language],
-    }));
+    setWizard((current) =>
+      createWizardState({
+        ...current,
+        languages: current.languages.includes(language)
+          ? current.languages.filter((item) => item !== language)
+          : [...current.languages, language],
+      }),
+    );
   };
 
-  const generateAiStory = () => {
-    const promptBase = wizard.backgroundPrompt.trim();
-    const template = AI_STORIES[Math.floor(Math.random() * AI_STORIES.length)];
-    updateWizard({
-      generatedStory: promptBase ? `${promptBase} ${template}` : template,
+  const rollWizardHitPoints = () => {
+    setWizard((current) => {
+      const rolled = rollD12HitPoints(current.level, calculateModifier(current.stats.ВЫН));
+      return createWizardState({
+        ...current,
+        hpMode: "random",
+        hpRolls: rolled.rolls,
+        hpPreview: rolled.total,
+      });
     });
   };
 
+  const generateAiStory = () => {
+    const template = AI_STORIES[Math.floor(Math.random() * AI_STORIES.length)];
+    const generated = buildMockAiBackground(
+      wizard.backgroundPrompt.trim()
+        ? `${wizard.backgroundPrompt.trim()} ${template}`
+        : template,
+      wizard.backgroundPreset,
+    );
+    setWizard((current) =>
+      createWizardState({
+        ...current,
+        backgroundMode: "custom",
+        generatedStory: generated.narrative,
+        backgroundDetails: generated,
+      }),
+    );
+  };
+
   const finishWizard = () => {
-    const hitPoints =
-      wizard.hpMode === "fixed"
-        ? currentClass.hitDie + calculateModifier(wizard.stats.ВЫН) + (wizard.level - 1) * currentClass.fixedHp
-        : rollHitPoints(currentClass.hitDie, wizard.level, calculateModifier(wizard.stats.ВЫН));
+    const hitPoints = getWizardHitPoints(wizard, currentClass);
     const character = {
       id: `char-${Date.now()}`,
       campaignId: selectedCampaign.id,
@@ -676,19 +1146,23 @@ export default function App() {
       hp: hitPoints,
       armor: 10 + Math.max(calculateModifier(wizard.stats.ЛОВ), 1) + 3,
       initiative: formatModifier(calculateModifier(wizard.stats.ЛОВ)),
-      background: wizard.generatedStory || wizard.backgroundPreset,
+      background:
+        wizard.generatedStory || wizard.backgroundDetails?.narrative || wizard.backgroundPreset,
       gender: wizard.gender,
       languages: wizard.languages,
       alignment: wizard.alignment,
       feat: wizard.feat,
+      backgroundDetails:
+        wizard.backgroundDetails ??
+        buildMockAiBackground(wizard.generatedStory, wizard.backgroundPreset),
       inventory: [
         ...((EQUIPMENT_PACKS.find((item) => item.name === wizard.equipmentPack)?.items) ?? []),
         ...(wizard.extraEquipment ? [wizard.extraEquipment] : []),
       ],
       stats: { ...wizard.stats },
-      skills: buildFullSkills(wizard.stats),
+      skills: buildCharacterSkills(wizard.stats),
     };
-    setCharacters((current) => [character, ...current]);
+    setCharacters((current) => [normalizeCharacter(character), ...current]);
     setSelectedCharacterId(character.id);
     setActivePage("characters");
     closeWizard();
@@ -712,10 +1186,9 @@ export default function App() {
               stats: { ...character.stats, [stat]: nextValue },
               initiative:
                 stat === "ЛОВ" ? formatModifier(calculateModifier(nextValue)) : character.initiative,
-              skills: buildFullSkills(
-                stat === "ЛОВ"
-                  ? { ...character.stats, [stat]: nextValue }
-                  : { ...character.stats, [stat]: nextValue },
+              skills: buildCharacterSkills(
+                { ...character.stats, [stat]: nextValue },
+                character.skills,
               ),
             }
           : character,
@@ -723,11 +1196,129 @@ export default function App() {
     );
   };
 
+  const updateCampaign = (campaignId, updater) => {
+    setCampaigns((current) =>
+      current.map((campaign) =>
+        campaign.id === campaignId ? normalizeCampaign(updater(campaign)) : campaign,
+      ),
+    );
+  };
+
+  const updateCampaignCollection = (campaignId, key, itemId, patch) => {
+    updateCampaign(campaignId, (campaign) => ({
+      ...campaign,
+      [key]: campaign[key].map((item) => (item.id === itemId ? { ...item, ...patch } : item)),
+    }));
+  };
+
+  const addWorkspaceScene = (campaignId) => {
+    updateCampaign(campaignId, (campaign) => ({
+      ...campaign,
+      workspaceScenes: [
+        {
+          id: `scene-${Date.now()}`,
+          title: `Сцена ${campaign.workspaceScenes.length + 1}`,
+          summary: "Новая сцена для подготовки, мотивации NPC и распределения скрытой информации.",
+          objective: campaign.nextGoal,
+          location: campaign.locations[0]?.name ?? campaign.mapLabel,
+          status: "Черновик",
+          visibility: "visible",
+          hiddenNote: "Скрытая ремарка мастера: какой поворот нужно удержать до нужного момента.",
+        },
+        ...campaign.workspaceScenes,
+      ],
+    }));
+  };
+
+  const addWorkspaceNpc = (campaignId) => {
+    updateCampaign(campaignId, (campaign) => ({
+      ...campaign,
+      npcs: [
+        createDetailedNpc(
+          {
+            id: `npc-${Date.now()}`,
+            name: `Новый NPC ${campaign.npcs.length + 1}`,
+            role: "Контакт",
+            visibility: "visible",
+          },
+          campaign,
+          0,
+        ),
+        ...campaign.npcs,
+      ],
+    }));
+  };
+
+  const addPlotThread = (campaignId) => {
+    updateCampaign(campaignId, (campaign) => ({
+      ...campaign,
+      plotThreads: [
+        {
+          id: `thread-${Date.now()}`,
+          name: `Сюжетная нить ${campaign.plotThreads.length + 1}`,
+          summary: "Новая нить для скрытой угрозы, последствий выбора или личной арки персонажа.",
+          stage: "Черновик",
+          linkedNodes: [campaign.npcs[0]?.name, campaign.locations[0]?.name].filter(Boolean),
+          visibility: "hidden",
+          hiddenNote: "Определите, когда эта нить станет явной для игроков и через какой триггер.",
+        },
+        ...campaign.plotThreads,
+      ],
+    }));
+  };
+
+  const addTimelineEvent = (campaignId) => {
+    updateCampaign(campaignId, (campaign) => ({
+      ...campaign,
+      timeline: [
+        ...campaign.timeline,
+        {
+          id: `timeline-${Date.now()}`,
+          date: `Сцена ${campaign.timeline.length + 1}`,
+          title: "Новый таймлайн-узел",
+          text: "Опишите событие, последствие или раскрытие, которое должно удержать кампанию в ритме.",
+          linkedTo: "Связать со сценой или нитью",
+          visibility: "visible",
+        },
+      ],
+    }));
+  };
+
   const addCampaignDraftPlayer = () => {
     if (!newPlayerNickname.trim()) {
       return;
     }
     setCampaignDraftPlayers((current) => [...current, newPlayerNickname.trim()]);
+    setNewPlayerNickname("");
+  };
+
+  const createCampaign = () => {
+    const nextCampaign = buildCampaignFromDraft({
+      id: `camp-${Date.now()}`,
+      name: campaignDraftName,
+      summary: campaignDraftSummary,
+      theme: campaignDraftTheme,
+      nextSessionTitle: campaignDraftSessionTitle,
+      nextSessionDate: campaignDraftSessionDate,
+      invitedPlayers: campaignDraftPlayers,
+    });
+
+    setCampaigns((current) => [nextCampaign, ...current]);
+    setSelectedCampaignId(nextCampaign.id);
+    setAnalyticsCampaignId(nextCampaign.id);
+    setAnalyticsSessionId(nextCampaign.sessionHistory[0].id);
+    setSessionLogsByCampaign((current) => ({
+      ...current,
+      [nextCampaign.id]: nextCampaign.sessionHistory[0].log,
+    }));
+    setCreateCampaignOpen(false);
+    setActivePage("campaign-detail");
+    setCampaignDraftName("Новая кампания");
+    setCampaignDraftSummary("Точка входа для новой сюжетной арки, игроков и структуры мира.");
+    setCampaignDraftTheme("Политические тайны, опасное путешествие и медленно раскрывающиеся долги прошлого.");
+    setCampaignDraftSessionTitle("Сессия 1: Пролог");
+    setCampaignDraftSessionDate("30 апреля, 19:00");
+    setCampaignDraftPlayers(["Элария", "Бром"]);
     setNewPlayerNickname("");
   };
 
@@ -760,10 +1351,10 @@ export default function App() {
     if (activePage === "campaigns") {
       return (
         <CampaignCatalog
-        eyebrow="Игрок / Кампании"
+          eyebrow="Игрок / Кампании"
           title="Активные кампании"
           description="Открывайте кампанию, чтобы быстро восстановить события, заметки и контекст последних игровых сцен."
-          campaigns={campaignsData}
+          campaigns={campaigns}
           pinnedIds={pinnedIds}
           onTogglePin={togglePin}
           onOpenCampaign={openCampaignDetail}
@@ -790,7 +1381,7 @@ export default function App() {
       return (
         <NotesWorldPage
           notes={filteredNotes}
-          campaigns={campaignsData}
+          campaigns={campaigns}
           currentFilter={noteCampaignFilter}
           onChangeFilter={setNoteCampaignFilter}
           pinnedIds={pinnedIds}
@@ -813,7 +1404,7 @@ export default function App() {
 
     return (
       <PlayerDashboard
-        campaigns={campaignsData}
+        campaigns={campaigns}
         selectedCampaign={selectedCampaign}
         characters={characters}
         pinnedItems={pinnedItems}
@@ -824,6 +1415,10 @@ export default function App() {
         showDashboardControls={showDashboardControls}
         onToggleControls={() => setShowDashboardControls((current) => !current)}
         onOpenCampaign={openCampaignDetail}
+        onOpenCharacter={(characterId) => {
+          setSelectedCharacterId(characterId);
+          setActivePage("characters");
+        }}
         onTogglePin={togglePin}
       />
     );
@@ -851,7 +1446,7 @@ export default function App() {
     if (activePage === "campaigns") {
       return (
         <DMCampaignsPage
-          campaigns={campaignsData}
+          campaigns={campaigns}
           pinnedIds={pinnedIds}
           onTogglePin={togglePin}
           onOpenCampaign={openCampaignDetail}
@@ -863,10 +1458,27 @@ export default function App() {
     if (activePage === "session") {
       return (
         <WorldBuildingPage
+          key={selectedCampaign.id}
           campaign={selectedCampaign}
           collapsedBoards={collapsedBoards}
           onToggleBoard={(key) =>
             setCollapsedBoards((current) => ({ ...current, [key]: !current[key] }))
+          }
+          onCreateScene={() => addWorkspaceScene(selectedCampaign.id)}
+          onCreateNpc={() => addWorkspaceNpc(selectedCampaign.id)}
+          onCreatePlotThread={() => addPlotThread(selectedCampaign.id)}
+          onAddTimelineEvent={() => addTimelineEvent(selectedCampaign.id)}
+          onUpdateScene={(sceneId, patch) =>
+            updateCampaignCollection(selectedCampaign.id, "workspaceScenes", sceneId, patch)
+          }
+          onUpdateNpc={(npcId, patch) =>
+            updateCampaignCollection(selectedCampaign.id, "npcs", npcId, patch)
+          }
+          onUpdatePlotThread={(threadId, patch) =>
+            updateCampaignCollection(selectedCampaign.id, "plotThreads", threadId, patch)
+          }
+          onUpdateTimelineEvent={(eventId, patch) =>
+            updateCampaignCollection(selectedCampaign.id, "timeline", eventId, patch)
           }
         />
       );
@@ -876,12 +1488,12 @@ export default function App() {
       return (
         <AnalyticsPage
           analytics={analyticsData}
-          campaigns={campaignsData}
+          campaigns={campaigns}
           selectedCampaignId={analyticsCampaignId}
           selectedSessionId={analyticsSessionId}
           onSelectCampaign={(campaignId) => {
             setAnalyticsCampaignId(campaignId);
-            const campaign = campaignsData.find((item) => item.id === campaignId) ?? campaignsData[0];
+            const campaign = campaigns.find((item) => item.id === campaignId) ?? campaigns[0];
             setAnalyticsSessionId(campaign.sessionHistory[0].id);
           }}
           onSelectSession={setAnalyticsSessionId}
@@ -892,17 +1504,29 @@ export default function App() {
     }
 
     if (activePage === "notes") {
-      return <DMNotesPage notes={dmNotes} campaigns={campaignsData} />;
+      return <DMNotesPage notes={dmNotes} campaigns={campaigns} />;
     }
 
-    return <DMDashboard campaigns={campaignsData} pinnedItems={pinnedItems} onOpenCampaign={openCampaignDetail} />;
+    return (
+      <DMDashboard
+        campaigns={campaigns}
+        pinnedItems={pinnedItems}
+        dashboardBlocks={dmDashboardBlocks}
+        showControls={showDmDashboardControls}
+        onToggleControls={() => setShowDmDashboardControls((current) => !current)}
+        onToggleDashboardBlock={(key) =>
+          setDmDashboardBlocks((current) => ({ ...current, [key]: !current[key] }))
+        }
+        onOpenCampaign={openCampaignDetail}
+      />
+    );
   };
 
   return (
     <Layout
       role={role}
       activePage={activePage}
-      onPageChange={setActivePage}
+      onPageChange={handlePageChange}
       searchValue={searchValue}
       onSearchChange={setSearchValue}
       onRoleSwitch={handleRoleSwitch}
@@ -924,6 +1548,7 @@ export default function App() {
           onApplyManualDistribution={applyManualDistribution}
           onRandomizeLanguages={randomizeLanguages}
           onToggleLanguage={toggleLanguage}
+          onRollHitPoints={rollWizardHitPoints}
           onGenerateAiStory={generateAiStory}
           onFinish={finishWizard}
           currentClass={currentClass}
@@ -935,22 +1560,50 @@ export default function App() {
             <label className="block">
               <span className="mb-2 block text-sm text-stone-300">Название кампании</span>
               <input
+                value={campaignDraftName}
+                onChange={(event) => setCampaignDraftName(event.target.value)}
                 className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-stone-100 outline-none"
-                defaultValue="Новая кампания"
               />
             </label>
             <label className="block">
               <span className="mb-2 block text-sm text-stone-300">Краткое описание</span>
               <textarea
                 rows="4"
+                value={campaignDraftSummary}
+                onChange={(event) => setCampaignDraftSummary(event.target.value)}
                 className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-stone-100 outline-none"
-                defaultValue="Точка входа для новой сюжетной арки, игроков и структуры мира."
+              />
+            </label>
+            <div className="grid gap-4 md:grid-cols-2">
+              <label className="block">
+                <span className="mb-2 block text-sm text-stone-300">Тон кампании</span>
+                <input
+                  value={campaignDraftTheme}
+                  onChange={(event) => setCampaignDraftTheme(event.target.value)}
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-stone-100 outline-none"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm text-stone-300">Первая сессия</span>
+                <input
+                  value={campaignDraftSessionTitle}
+                  onChange={(event) => setCampaignDraftSessionTitle(event.target.value)}
+                  className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-stone-100 outline-none"
+                />
+              </label>
+            </div>
+            <label className="block">
+              <span className="mb-2 block text-sm text-stone-300">Дата и время первой сессии</span>
+              <input
+                value={campaignDraftSessionDate}
+                onChange={(event) => setCampaignDraftSessionDate(event.target.value)}
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-stone-100 outline-none"
               />
             </label>
             <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
               <div className="flex items-center justify-between">
-                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Игроки кампании</p>
-                <Tag tone="warm">Игроки</Tag>
+                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Приглашения игроков</p>
+                <Tag tone="warm">{campaignDraftPlayers.length} приглашено</Tag>
               </div>
               <div className="mt-4 flex flex-col gap-3 sm:flex-row">
                 <input
@@ -974,7 +1627,24 @@ export default function App() {
                   </Tag>
                 ))}
               </div>
-              <p className="mt-4 text-sm text-stone-400">На стороне игрока появится уведомление: «Вас добавили в кампанию».</p>
+              <p className="mt-4 text-sm text-stone-400">
+                Игроки добавляются по нику прямо в процессе создания кампании и сразу попадают в список приглашённых.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setCreateCampaignOpen(false)}
+                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={createCampaign}
+                className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-red-700 px-5 py-3 text-sm font-medium text-white"
+              >
+                <Plus className="h-4 w-4" />
+                Создать кампанию
+              </button>
             </div>
           </div>
         </ModalShell>
@@ -1069,8 +1739,18 @@ function PlayerDashboard({
   showDashboardControls,
   onToggleControls,
   onOpenCampaign,
+  onOpenCharacter,
   onTogglePin,
 }) {
+  const blockOptions = [
+    { key: "spotlight", label: "Главная сессия" },
+    { key: "campaigns", label: "Кампании" },
+    { key: "pinned", label: "Закреплённое" },
+    { key: "updates", label: "Последние обновления" },
+    { key: "recommendations", label: "Рекомендации" },
+    { key: "party", label: "Активность группы" },
+  ];
+
   return (
     <section>
       <SectionTitle
@@ -1090,11 +1770,7 @@ function PlayerDashboard({
               <div className="absolute right-0 top-[calc(100%+12px)] z-20 w-72 rounded-[24px] border border-white/10 bg-[#120d0f]/95 p-4 shadow-2xl backdrop-blur-xl">
                 <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Видимость блоков</p>
                 <div className="mt-4 space-y-3">
-                  {[
-                    { key: "pinned", label: "Закреплённое" },
-                    { key: "updates", label: "Последние обновления" },
-                    { key: "recommendations", label: "Рекомендации" },
-                  ].map((item) => (
+                  {blockOptions.map((item) => (
                     <button
                       key={item.key}
                       onClick={() => onToggleDashboardBlock(item.key)}
@@ -1115,54 +1791,64 @@ function PlayerDashboard({
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="space-y-6">
-          <GlassCard className="overflow-hidden">
-            <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-              <div className="min-w-0">
-                <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Следующая сессия</p>
-                <h4 className="mt-2 break-words font-display text-4xl text-parchment">{selectedCampaign.nextSessionTitle}</h4>
-                <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-300">{selectedCampaign.summary}</p>
+          {dashboardBlocks.spotlight ? (
+            <GlassCard className="overflow-hidden">
+              <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Следующая сессия</p>
+                  <h4 className="mt-2 break-words font-display text-4xl text-parchment">
+                    {selectedCampaign.nextSessionTitle}
+                  </h4>
+                  <p className="mt-4 max-w-2xl text-sm leading-7 text-stone-300">
+                    {selectedCampaign.summary}
+                  </p>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <StatPill label="Дата" value={selectedCampaign.nextSessionDate} tone="warm" />
+                  <StatPill label="Кампания" value={selectedCampaign.name} tone="blue" />
+                </div>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <StatPill label="Дата" value={selectedCampaign.nextSessionDate} tone="warm" />
-                <StatPill label="Кампания" value={selectedCampaign.name} tone="blue" />
-              </div>
-            </div>
-          </GlassCard>
+            </GlassCard>
+          ) : null}
 
-          <div className="grid gap-5 md:grid-cols-2">
-            {campaigns.map((campaign) => (
-              <button key={campaign.id} onClick={() => onOpenCampaign(campaign.id)} className="text-left">
-                <GlassCard className="h-full transition-transform duration-300 hover:-translate-y-1">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <Tag tone="warm">{campaign.status}</Tag>
-                      <h4 className="mt-4 break-words font-display text-3xl text-parchment">{campaign.name}</h4>
-                      <p className="mt-2 text-sm text-stone-400">{campaign.theme}</p>
+          {dashboardBlocks.campaigns ? (
+            <div className="grid gap-5 md:grid-cols-2">
+              {campaigns.map((campaign) => (
+                <button key={campaign.id} onClick={() => onOpenCampaign(campaign.id)} className="text-left">
+                  <GlassCard className="h-full transition-transform duration-300 hover:-translate-y-1">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <Tag tone="warm">{campaign.status}</Tag>
+                        <h4 className="mt-4 break-words font-display text-3xl text-parchment">
+                          {campaign.name}
+                        </h4>
+                        <p className="mt-2 break-words text-sm text-stone-400">{campaign.theme}</p>
+                      </div>
+                      <button
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onTogglePin(campaign.id);
+                        }}
+                        className="rounded-2xl border border-white/10 bg-white/5 p-2 text-stone-300"
+                      >
+                        <Pin className="h-4 w-4" />
+                      </button>
                     </div>
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onTogglePin(campaign.id);
-                      }}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-2 text-stone-300"
-                    >
-                      <Pin className="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div className="mt-6 rounded-[22px] border border-white/10 bg-black/20 p-4">
-                    <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Следующая цель</p>
-                    <p className="mt-2 text-sm text-stone-200">{campaign.nextGoal}</p>
-                  </div>
-                  <div className="mt-4 flex items-center justify-between text-sm text-stone-400">
-                    <span>{campaign.nextSessionDate}</span>
-                    <span className="inline-flex items-center gap-2 text-amber-100">
-                      Открыть <ChevronRight className="h-4 w-4" />
-                    </span>
-                  </div>
-                </GlassCard>
-              </button>
-            ))}
-          </div>
+                    <div className="mt-6 rounded-[22px] border border-white/10 bg-black/20 p-4">
+                      <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Следующая цель</p>
+                      <p className="mt-2 break-words text-sm text-stone-200">{campaign.nextGoal}</p>
+                    </div>
+                    <div className="mt-4 flex items-center justify-between gap-3 text-sm text-stone-400">
+                      <span className="min-w-0 break-words">{campaign.nextSessionDate}</span>
+                      <span className="inline-flex shrink-0 items-center gap-2 text-amber-100">
+                        Открыть <ChevronRight className="h-4 w-4" />
+                      </span>
+                    </div>
+                  </GlassCard>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-6">
@@ -1224,22 +1910,28 @@ function PlayerDashboard({
             </GlassCard>
           ) : null}
 
-          <GlassCard>
-            <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Активность группы</p>
-            <div className="mt-5 space-y-3">
-              {characters.map((character) => (
-                <div key={character.id} className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm text-stone-100">{character.name}</p>
-                    <p className="truncate text-xs text-stone-500">
-                      {character.className} • {character.campaignName}
-                    </p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-stone-500" />
-                </div>
-              ))}
-            </div>
-          </GlassCard>
+          {dashboardBlocks.party ? (
+            <GlassCard>
+              <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Активность группы</p>
+              <div className="mt-5 space-y-3">
+                {characters.map((character) => (
+                  <button
+                    key={character.id}
+                    onClick={() => onOpenCharacter(character.id)}
+                    className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-stone-100">{character.name}</p>
+                      <p className="truncate text-xs text-stone-500">
+                        {character.className} • {character.campaignName}
+                      </p>
+                    </div>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-stone-500" />
+                  </button>
+                ))}
+              </div>
+            </GlassCard>
+          ) : null}
         </div>
       </div>
     </section>
@@ -1319,7 +2011,10 @@ function CharactersPage({
 
       <div className="grid gap-6 xl:grid-cols-[0.82fr_1.18fr]">
         <GlassCard>
-          <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Список героев</p>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Список героев</p>
+            <Tag tone="warm">{characters.length} персонажа</Tag>
+          </div>
           <div className="mt-5 space-y-3">
             {characters.map((character) => {
               const isActive = character.id === selectedCharacter?.id;
@@ -1376,6 +2071,14 @@ function CharactersPage({
 function CharacterSheet({ character, onFieldChange, onStatChange }) {
   if (!character) return null;
 
+  const skills = SKILL_ORDER.map((name) => [
+    name,
+    (character.skills ?? buildCharacterSkills(character.stats))[name] ??
+      buildCharacterSkills(character.stats)[name],
+  ]);
+  const backgroundDetails =
+    character.backgroundDetails ?? buildMockAiBackground(character.background, character.background);
+
   return (
     <GlassCard className="overflow-hidden">
       <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -1389,11 +2092,20 @@ function CharacterSheet({ character, onFieldChange, onStatChange }) {
           <p className="mt-2 text-sm text-stone-400">
             {character.race} • {character.className} • Кампания: {character.campaignName}
           </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Tag tone="warm">{character.gender === "male" ? "Мужской" : "Женский"}</Tag>
+            <Tag>{character.alignment}</Tag>
+            <Tag>{character.feat}</Tag>
+            {(character.languages ?? []).map((language) => (
+              <Tag key={language}>{language}</Tag>
+            ))}
+          </div>
         </div>
         <div className="flex flex-wrap gap-3">
           <StatPill label="Ур." value={character.level} tone="warm" />
           <StatPill label="HP" value={character.hp} tone="red" />
           <StatPill label="Класс брони" value={character.armor} tone="blue" />
+          <StatPill label="Инициатива" value={character.initiative} tone="green" />
           <button className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200">
             Выгрузить лист персонажа
           </button>
@@ -1424,11 +2136,24 @@ function CharacterSheet({ character, onFieldChange, onStatChange }) {
               onChange={(event) => onFieldChange("background", event.target.value)}
               className="mt-4 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-7 text-stone-300 outline-none"
             />
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {[
+                { label: "Истоки", value: backgroundDetails.origin },
+                { label: "Перелом", value: backgroundDetails.fracture },
+                { label: "Движущая сила", value: backgroundDetails.drive },
+                { label: "Крючок", value: backgroundDetails.hook },
+              ].map((item) => (
+                <div key={item.label} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-stone-500">{item.label}</p>
+                  <p className="mt-2 text-sm leading-6 text-stone-300">{item.value}</p>
+                </div>
+              ))}
+            </div>
           </div>
           <div className="rounded-[24px] border border-white/10 bg-black/20 p-5">
             <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Навыки</p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {Object.entries(character.skills ?? buildFullSkills(character.stats)).map(([name, value]) => (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {skills.map(([name, value]) => (
                 <SkillTooltipCard key={name} name={name} value={value} />
               ))}
             </div>
@@ -1489,6 +2214,7 @@ function SkillTooltipCard({ name, value }) {
   return (
     <div className="group relative rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
       <p className="text-sm text-stone-100">{name}</p>
+      <p className="mt-1 text-xs text-stone-500">{info.ability}</p>
       <p className="mt-1 text-lg text-amber-100">{formatModifier(value)}</p>
       <div className="pointer-events-none absolute left-0 top-full z-20 hidden w-72 rounded-2xl border border-white/10 bg-[#120d0f] p-4 text-left shadow-2xl group-hover:block">
         <p className="text-sm text-parchment">
@@ -1875,71 +2601,145 @@ function CampaignDetailPage({
   );
 }
 
-function DMDashboard({ campaigns, pinnedItems, onOpenCampaign }) {
+function DMDashboard({
+  campaigns,
+  pinnedItems,
+  dashboardBlocks,
+  showControls,
+  onToggleControls,
+  onToggleDashboardBlock,
+  onOpenCampaign,
+}) {
   const mainCampaign = campaigns[0];
+  const blockOptions = [
+    { key: "overview", label: "Главный обзор" },
+    { key: "campaigns", label: "Быстрый доступ к кампаниям" },
+    { key: "pinned", label: "Закреплённое" },
+    { key: "activity", label: "Активность мира" },
+  ];
+
   return (
     <section>
       <SectionTitle
         eyebrow="Мастер / Главная"
         title="Панель управления кампаниями"
         description="Следите за ближайшими сессиями, составом групп, состоянием кампаний и изменениями в игровом мире."
+        action={
+          <div className="relative">
+            <button
+              onClick={onToggleControls}
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200 transition hover:bg-white/10"
+            >
+              <Settings2 className="h-4 w-4" />
+              Настроить блоки
+            </button>
+            {showControls ? (
+              <div className="absolute right-0 top-[calc(100%+12px)] z-20 w-72 rounded-[24px] border border-white/10 bg-[#120d0f]/95 p-4 shadow-2xl backdrop-blur-xl">
+                <p className="text-xs uppercase tracking-[0.28em] text-stone-500">Видимость блоков</p>
+                <div className="mt-4 space-y-3">
+                  {blockOptions.map((item) => (
+                    <button
+                      key={item.key}
+                      onClick={() => onToggleDashboardBlock(item.key)}
+                      className="flex w-full items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200"
+                    >
+                      {item.label}
+                      <span className={dashboardBlocks[item.key] ? "text-emerald-300" : "text-stone-500"}>
+                        {dashboardBlocks[item.key] ? "Вкл" : "Выкл"}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        }
       />
       <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <div className="space-y-6">
-          <GlassCard className="overflow-hidden bg-[linear-gradient(135deg,rgba(143,47,35,0.25),rgba(255,255,255,0.03))]">
-            <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-              <div className="min-w-0">
-                <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Ближайшая сессия</p>
-                <h4 className="mt-2 break-words font-display text-4xl text-parchment">{mainCampaign.nextSessionTitle}</h4>
-                <p className="mt-4 break-words text-sm leading-7 text-stone-300">{mainCampaign.summary}</p>
+          {dashboardBlocks.overview ? (
+            <GlassCard className="overflow-hidden bg-[linear-gradient(135deg,rgba(143,47,35,0.25),rgba(255,255,255,0.03))]">
+              <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
+                <div className="min-w-0">
+                  <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Ближайшая сессия</p>
+                  <h4 className="mt-2 break-words font-display text-4xl text-parchment">
+                    {mainCampaign.nextSessionTitle}
+                  </h4>
+                  <p className="mt-4 break-words text-sm leading-7 text-stone-300">
+                    {mainCampaign.summary}
+                  </p>
+                </div>
+                <div className="grid w-full max-w-[360px] gap-3 xl:max-w-[320px]">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex min-h-[98px] flex-col items-center justify-center rounded-[22px] border border-white/10 bg-black/20 px-4 py-4 text-center">
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-stone-500">Статус</p>
+                      <p className="mt-3 break-words text-lg font-semibold leading-6 text-stone-100">
+                        {mainCampaign.status}
+                      </p>
+                    </div>
+                    <div className="flex min-h-[98px] flex-col items-center justify-center rounded-[22px] border border-white/10 bg-black/20 px-4 py-4 text-center">
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-stone-500">Игроки</p>
+                      <p className="mt-3 break-words text-lg font-semibold leading-6 text-stone-100">
+                        {mainCampaign.players.length}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex min-h-[98px] flex-col items-center justify-center rounded-[22px] border border-white/10 bg-black/20 px-4 py-4 text-center">
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-stone-500">Дата + Время</p>
+                    <p className="mt-3 break-words text-lg font-semibold leading-6 text-stone-100">
+                      {mainCampaign.nextSessionDate}
+                    </p>
+                  </div>
+                </div>
               </div>
-              <div className="grid min-w-0 gap-3 sm:grid-cols-3">
-                <DashboardMetric label="Дата" value={mainCampaign.nextSessionDate} />
-                <DashboardMetric label="Игроки" value={mainCampaign.players.length} />
-                <DashboardMetric label="Статус" value={mainCampaign.status} />
-              </div>
-            </div>
-          </GlassCard>
+            </GlassCard>
+          ) : null}
 
-          <div className="grid gap-5 md:grid-cols-3">
-            {campaigns.slice(0, 3).map((campaign) => (
-              <button key={campaign.id} onClick={() => onOpenCampaign(campaign.id)} className="text-left">
-                <GlassCard className="h-full transition-transform duration-300 hover:-translate-y-1">
-                  <MapPinned className="h-5 w-5 text-amber-300" />
-                  <p className="mt-4 text-xs uppercase tracking-[0.24em] text-stone-500">Кампания</p>
-                  <p className="mt-2 break-words font-display text-3xl text-parchment">{campaign.name}</p>
-                  <p className="mt-2 text-sm text-stone-400">{campaign.nextSessionDate}</p>
-                </GlassCard>
-              </button>
-            ))}
-          </div>
+          {dashboardBlocks.campaigns ? (
+            <div className="grid gap-5 md:grid-cols-3">
+              {campaigns.slice(0, 3).map((campaign) => (
+                <button key={campaign.id} onClick={() => onOpenCampaign(campaign.id)} className="text-left">
+                  <GlassCard className="h-full transition-transform duration-300 hover:-translate-y-1">
+                    <MapPinned className="h-5 w-5 text-amber-300" />
+                    <p className="mt-4 text-xs uppercase tracking-[0.24em] text-stone-500">Кампания</p>
+                    <p className="mt-2 break-words font-display text-3xl text-parchment">{campaign.name}</p>
+                    <p className="mt-2 break-words text-sm text-stone-400">{campaign.nextSessionDate}</p>
+                  </GlassCard>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-6">
-          <GlassCard>
-            <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Закреплённое</p>
-            <div className="mt-5 space-y-3">
-              {pinnedItems.map((item) => (
-                <div key={item.id} className="rounded-[22px] border border-white/10 bg-white/5 px-4 py-4">
-                  <p className="truncate text-sm text-stone-100">{item.label}</p>
-                  <p className="truncate text-xs text-stone-500">
-                    {item.type} • {item.meta}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </GlassCard>
+          {dashboardBlocks.pinned ? (
+            <GlassCard>
+              <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Закреплённое</p>
+              <div className="mt-5 space-y-3">
+                {pinnedItems.map((item) => (
+                  <div key={item.id} className="rounded-[22px] border border-white/10 bg-white/5 px-4 py-4">
+                    <p className="truncate text-sm text-stone-100">{item.label}</p>
+                    <p className="truncate text-xs text-stone-500">
+                      {item.type} • {item.meta}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </GlassCard>
+          ) : null}
 
-          <GlassCard>
-            <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Активность мира</p>
-            <div className="mt-5 space-y-3">
-              {mainCampaign.activityLog.map((item) => (
-                <div key={item} className="rounded-[22px] border border-white/10 bg-black/20 px-4 py-4 text-sm leading-7 text-stone-300">
-                  {item}
-                </div>
-              ))}
-            </div>
-          </GlassCard>
+          {dashboardBlocks.activity ? (
+            <GlassCard>
+              <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Активность мира</p>
+              <div className="mt-5 space-y-3">
+                {mainCampaign.activityLog.map((item) => (
+                  <div key={item} className="rounded-[22px] border border-white/10 bg-black/20 px-4 py-4 text-sm leading-7 text-stone-300">
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </GlassCard>
+          ) : null}
         </div>
       </div>
     </section>
@@ -2004,13 +2804,50 @@ function DMCampaignsPage({ campaigns, pinnedIds, onTogglePin, onOpenCampaign, on
   );
 }
 
-function WorldBuildingPage({ campaign, collapsedBoards, onToggleBoard }) {
+function WorldBuildingPage({
+  campaign,
+  collapsedBoards,
+  onToggleBoard,
+  onCreateScene,
+  onCreateNpc,
+  onCreatePlotThread,
+  onAddTimelineEvent,
+  onUpdateScene,
+  onUpdateNpc,
+  onUpdatePlotThread,
+  onUpdateTimelineEvent,
+}) {
   return (
     <section>
       <SectionTitle
         eyebrow="Мастер / Сессии"
         title="Сессии"
-        description="Рабочее пространство для планирования сюжета, создания неигровых персонажей, сюжетных нитей, сцен и редактирования таймлайна без визуального шума."
+        description="Планируйте сцены, ведите NPC, стройте сюжетные нити и редактируйте таймлайн в одном пространстве сессий."
+        action={
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={onCreateScene}
+              className="inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-amber-500 to-red-700 px-4 py-3 text-sm font-medium text-white"
+            >
+              <Milestone className="h-4 w-4" />
+              Создать сцену
+            </button>
+            <button
+              onClick={onCreateNpc}
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200"
+            >
+              <BookUser className="h-4 w-4" />
+              Создать NPC
+            </button>
+            <button
+              onClick={onCreatePlotThread}
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200"
+            >
+              <ScrollText className="h-4 w-4" />
+              Создать сюжетную нить
+            </button>
+          </div>
+        }
       />
       <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
         <div className="space-y-6">
@@ -2025,12 +2862,79 @@ function WorldBuildingPage({ campaign, collapsedBoards, onToggleBoard }) {
             </div>
           </GlassCard>
           <GlassCard>
-            <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Конструктор сцен</p>
-            <div className="mt-5 grid gap-3">
-              {campaign.sessionHistory.map((session) => (
-                <div key={session.id} className="rounded-[22px] border border-white/10 bg-black/20 p-4">
-                  <p className="text-sm text-stone-100">{session.title}</p>
-                  <p className="mt-1 text-xs text-stone-500">{session.summary}</p>
+            <div className="flex items-center justify-between">
+              <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Scene builder</p>
+              <Tag tone="warm">{campaign.workspaceScenes.length} узлов</Tag>
+            </div>
+            <div className="mt-5 grid gap-4">
+              {campaign.workspaceScenes.map((scene) => (
+                <div key={scene.id} className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <input
+                        value={scene.title}
+                        onChange={(event) => onUpdateScene(scene.id, { title: event.target.value })}
+                        className="w-full bg-transparent font-display text-2xl text-parchment outline-none"
+                      />
+                      <textarea
+                        rows="3"
+                        value={scene.summary}
+                        onChange={(event) => onUpdateScene(scene.id, { summary: event.target.value })}
+                        className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-stone-300 outline-none"
+                      />
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <button
+                        onClick={() =>
+                          onUpdateScene(scene.id, {
+                            visibility: scene.visibility === "visible" ? "hidden" : "visible",
+                          })
+                        }
+                        className={`inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm ${
+                          scene.visibility === "visible"
+                            ? "border border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
+                            : "border border-red-400/20 bg-red-500/10 text-red-100"
+                        }`}
+                      >
+                        {scene.visibility === "visible" ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                        {scene.visibility === "visible" ? "Видно игрокам" : "Скрыто"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Цель сцены</span>
+                      <textarea
+                        rows="3"
+                        value={scene.objective}
+                        onChange={(event) => onUpdateScene(scene.id, { objective: event.target.value })}
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200 outline-none"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Локация</span>
+                      <input
+                        value={scene.location}
+                        onChange={(event) => onUpdateScene(scene.id, { location: event.target.value })}
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200 outline-none"
+                      />
+                      <span className="mt-3 block text-xs uppercase tracking-[0.24em] text-stone-500">Статус</span>
+                      <input
+                        value={scene.status}
+                        onChange={(event) => onUpdateScene(scene.id, { status: event.target.value })}
+                        className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200 outline-none"
+                      />
+                    </label>
+                  </div>
+                  <div className="mt-4 rounded-2xl border border-red-400/15 bg-red-500/5 p-4">
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-red-200">Скрытая информация мастера</p>
+                    <textarea
+                      rows="3"
+                      value={scene.hiddenNote}
+                      onChange={(event) => onUpdateScene(scene.id, { hiddenNote: event.target.value })}
+                      className="mt-3 w-full rounded-2xl border border-red-400/15 bg-black/20 px-4 py-3 text-sm text-stone-200 outline-none"
+                    />
+                  </div>
                 </div>
               ))}
             </div>
@@ -2040,54 +2944,226 @@ function WorldBuildingPage({ campaign, collapsedBoards, onToggleBoard }) {
         <div className="space-y-6">
           <GlassCard>
             <div className="flex items-center justify-between">
-              <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Структурированные заметки</p>
-              <Tag tone="green">Связано</Tag>
+              <p className="text-xs uppercase tracking-[0.3em] text-stone-500">NPC creation hub</p>
+              <Tag tone="green">{campaign.npcs.length} NPC</Tag>
             </div>
-            <div className="mt-5 grid gap-4 lg:grid-cols-3">
-              <EntityCard title="Неигровые персонажи" items={campaign.npcs} />
-              <EntityCard title="Локации" items={campaign.locations} />
-              <EntityCard
-                title="События"
-                items={campaign.timeline.map((item) => ({
-                  id: item.id,
-                  name: item.title,
-                  tag: item.date,
-                  visibility: "visible",
-                }))}
-              />
+            <div className="mt-5 grid gap-4">
+              {campaign.npcs.map((npc) => (
+                <div key={npc.id} className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <input
+                        value={npc.name}
+                        onChange={(event) => onUpdateNpc(npc.id, { name: event.target.value })}
+                        className="w-full bg-transparent font-display text-2xl text-parchment outline-none"
+                      />
+                      <input
+                        value={npc.role}
+                        onChange={(event) => onUpdateNpc(npc.id, { role: event.target.value })}
+                        className="mt-2 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-300 outline-none"
+                      />
+                    </div>
+                    <button
+                      onClick={() =>
+                        onUpdateNpc(npc.id, {
+                          visibility: npc.visibility === "visible" ? "hidden" : "visible",
+                        })
+                      }
+                      className={`inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm ${
+                        npc.visibility === "visible"
+                          ? "border border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
+                          : "border border-red-400/20 bg-red-500/10 text-red-100"
+                      }`}
+                    >
+                      {npc.visibility === "visible" ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                      {npc.visibility === "visible" ? "Видно игрокам" : "Скрыто"}
+                    </button>
+                  </div>
+                  <textarea
+                    rows="3"
+                    value={npc.summary}
+                    onChange={(event) => onUpdateNpc(npc.id, { summary: event.target.value })}
+                    className="mt-4 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-300 outline-none"
+                  />
+                  <textarea
+                    rows="3"
+                    value={npc.agenda}
+                    onChange={(event) => onUpdateNpc(npc.id, { agenda: event.target.value })}
+                    className="mt-4 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-300 outline-none"
+                  />
+                  <div className="mt-4 rounded-2xl border border-red-400/15 bg-red-500/5 p-4">
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-red-200">Скрытая информация мастера</p>
+                    <textarea
+                      rows="3"
+                      value={npc.hiddenNote}
+                      onChange={(event) => onUpdateNpc(npc.id, { hiddenNote: event.target.value })}
+                      className="mt-3 w-full rounded-2xl border border-red-400/15 bg-black/20 px-4 py-3 text-sm text-stone-200 outline-none"
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           </GlassCard>
           <GlassCard>
             <div className="flex items-center justify-between">
-              <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Доска связей</p>
-              <Tag tone="warm">Группы</Tag>
+              <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Сюжетные нити</p>
+              <Tag tone="warm">{campaign.plotThreads.length} активных</Tag>
             </div>
             <div className="mt-5 space-y-4">
-              {Object.entries(campaign.relationships).map(([key, items]) => (
-                <div key={key} className="rounded-[24px] border border-white/10 bg-black/20 p-4">
-                  <button onClick={() => onToggleBoard(key)} className="flex w-full items-center justify-between text-left">
-                    <p className="text-sm text-stone-100">{relationshipTitle(key)}</p>
-                    <span className="text-xs text-stone-500">{collapsedBoards[key] ? "Развернуть" : "Свернуть"}</span>
-                  </button>
-                  {!collapsedBoards[key] ? (
-                    <div className="mt-4 grid gap-3">
-                      {items.slice(0, 3).map((item) => (
-                        <div key={item.title} className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                          <p className="text-sm text-stone-100">{item.title}</p>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {item.links.slice(0, 4).map((link) => (
-                              <Tag key={link}>{link}</Tag>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+              {campaign.plotThreads.map((thread) => (
+                <div key={thread.id} className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <input
+                        value={thread.name}
+                        onChange={(event) => onUpdatePlotThread(thread.id, { name: event.target.value })}
+                        className="w-full bg-transparent font-display text-2xl text-parchment outline-none"
+                      />
+                      <textarea
+                        rows="3"
+                        value={thread.summary}
+                        onChange={(event) => onUpdatePlotThread(thread.id, { summary: event.target.value })}
+                        className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-300 outline-none"
+                      />
                     </div>
-                  ) : null}
+                    <button
+                      onClick={() =>
+                        onUpdatePlotThread(thread.id, {
+                          visibility: thread.visibility === "visible" ? "hidden" : "visible",
+                        })
+                      }
+                      className={`inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm ${
+                        thread.visibility === "visible"
+                          ? "border border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
+                          : "border border-red-400/20 bg-red-500/10 text-red-100"
+                      }`}
+                    >
+                      {thread.visibility === "visible" ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                      {thread.visibility === "visible" ? "Видно игрокам" : "Скрыто"}
+                    </button>
+                  </div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <label className="block">
+                      <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Стадия</span>
+                      <input
+                        value={thread.stage}
+                        onChange={(event) => onUpdatePlotThread(thread.id, { stage: event.target.value })}
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-300 outline-none"
+                      />
+                    </label>
+                    <div>
+                      <span className="mb-2 block text-xs uppercase tracking-[0.24em] text-stone-500">Связанные узлы</span>
+                      <div className="flex flex-wrap gap-2">
+                        {thread.linkedNodes.map((link) => (
+                          <Tag key={link}>{link}</Tag>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-4 rounded-2xl border border-red-400/15 bg-red-500/5 p-4">
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-red-200">Скрытая информация мастера</p>
+                    <textarea
+                      rows="3"
+                      value={thread.hiddenNote}
+                      onChange={(event) => onUpdatePlotThread(thread.id, { hiddenNote: event.target.value })}
+                      className="mt-3 w-full rounded-2xl border border-red-400/15 bg-black/20 px-4 py-3 text-sm text-stone-200 outline-none"
+                    />
+                  </div>
                 </div>
               ))}
             </div>
           </GlassCard>
         </div>
+      </div>
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
+        <GlassCard>
+          <div className="flex items-center justify-between">
+            <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Timeline editor</p>
+            <button
+              onClick={onAddTimelineEvent}
+              className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-stone-200"
+            >
+              <Plus className="h-4 w-4" />
+              Добавить событие
+            </button>
+          </div>
+          <div className="mt-5 space-y-4">
+            {campaign.timeline.map((item) => (
+              <div key={item.id} className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                <div className="grid gap-4 md:grid-cols-[180px_1fr]">
+                  <input
+                    value={item.date}
+                    onChange={(event) => onUpdateTimelineEvent(item.id, { date: event.target.value })}
+                    className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-200 outline-none"
+                  />
+                  <div className="space-y-3">
+                    <input
+                      value={item.title}
+                      onChange={(event) => onUpdateTimelineEvent(item.id, { title: event.target.value })}
+                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-100 outline-none"
+                    />
+                    <textarea
+                      rows="3"
+                      value={item.text}
+                      onChange={(event) => onUpdateTimelineEvent(item.id, { text: event.target.value })}
+                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-300 outline-none"
+                    />
+                    <input
+                      value={item.linkedTo}
+                      onChange={(event) => onUpdateTimelineEvent(item.id, { linkedTo: event.target.value })}
+                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-stone-300 outline-none"
+                    />
+                    <button
+                      onClick={() =>
+                        onUpdateTimelineEvent(item.id, {
+                          visibility: item.visibility === "visible" ? "hidden" : "visible",
+                        })
+                      }
+                      className={`inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-sm ${
+                        item.visibility === "visible"
+                          ? "border border-emerald-400/20 bg-emerald-500/10 text-emerald-100"
+                          : "border border-red-400/20 bg-red-500/10 text-red-100"
+                      }`}
+                    >
+                      {item.visibility === "visible" ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                      {item.visibility === "visible" ? "Видно игрокам" : "Скрыто"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+        <GlassCard>
+          <div className="flex items-center justify-between">
+            <p className="text-xs uppercase tracking-[0.3em] text-stone-500">Структурированные связи</p>
+            <Tag tone="green">Story nodes</Tag>
+          </div>
+          <div className="mt-5 space-y-4">
+            {Object.entries(campaign.relationships).map(([key, items]) => (
+              <div key={key} className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                <button onClick={() => onToggleBoard(key)} className="flex w-full items-center justify-between text-left">
+                  <p className="text-sm text-stone-100">{relationshipTitle(key)}</p>
+                  <span className="text-xs text-stone-500">{collapsedBoards[key] ? "Развернуть" : "Свернуть"}</span>
+                </button>
+                {!collapsedBoards[key] ? (
+                  <div className="mt-4 grid gap-3">
+                    {items.slice(0, 3).map((item) => (
+                      <div key={item.title} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <p className="text-sm text-stone-100">{item.title}</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {item.links.slice(0, 4).map((link) => (
+                            <Tag key={link}>{link}</Tag>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </GlassCard>
       </div>
     </section>
   );
@@ -2234,6 +3310,7 @@ function CharacterWizardModal({
   onApplyManualDistribution,
   onRandomizeLanguages,
   onToggleLanguage,
+  onRollHitPoints,
   onGenerateAiStory,
   onFinish,
   currentClass,
@@ -2269,49 +3346,103 @@ function CharacterWizardModal({
       </div>
 
       {wizardStep === 0 ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          {DND_CLASSES.map((item) => (
-            <button
-              key={item.name}
-              onClick={() => onApplyQuickStats(item.name)}
-              className={`rounded-[24px] border p-4 text-left ${
-                wizard.classKey === item.name
-                  ? "border-amber-400/20 bg-amber-500/10"
-                  : "border-white/10 bg-white/5"
-              }`}
-            >
-              <h4 className="font-display text-2xl text-parchment">{item.ru}</h4>
-              <p className="mt-2 text-sm leading-7 text-stone-300">{item.description}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Tag tone="warm">d{item.hitDie}</Tag>
-                <Tag>Базовое HP: {item.fixedHp}</Tag>
-              </div>
-            </button>
-          ))}
-          <div className="lg:col-span-2 rounded-[24px] border border-white/10 bg-black/20 p-4">
-            <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Расчёт HP</p>
-            <div className="mt-4 flex gap-2">
+        <div className="grid gap-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block">
+              <span className="mb-2 block text-sm text-stone-300">Имя персонажа</span>
+              <input
+                value={wizard.name}
+                onChange={(event) => onUpdate({ name: event.target.value })}
+                placeholder="Например: Иара Шепот Пепла"
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-stone-100 outline-none"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-sm text-stone-300">Уровень</span>
+              <input
+                type="number"
+                min="1"
+                max="20"
+                value={wizard.level}
+                onChange={(event) => onUpdate({ level: Number(event.target.value) || 1 })}
+                className="w-full rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-stone-100 outline-none"
+              />
+            </label>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {DND_CLASSES.map((item) => (
               <button
-                onClick={() => onUpdate({ hpMode: "random" })}
-                className={`rounded-2xl px-4 py-2 text-sm ${
+                key={item.name}
+                onClick={() => onApplyQuickStats(item.name)}
+                className={`rounded-[24px] border p-4 text-left ${
+                  wizard.classKey === item.name
+                    ? "border-amber-400/20 bg-amber-500/10"
+                    : "border-white/10 bg-white/5"
+                }`}
+              >
+                <h4 className="font-display text-2xl text-parchment">{item.ru}</h4>
+                <p className="mt-2 text-sm leading-7 text-stone-300">{item.description}</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Tag tone="warm">d{item.hitDie}</Tag>
+                  <Tag>Фикс. HP/ур.: {item.fixedHp}</Tag>
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="min-w-0">
+                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Расчёт HP</p>
+                <p className="mt-2 text-sm leading-7 text-stone-300">
+                  Выберите фиксированное значение по классу или случайный бросок `d12` за каждый уровень.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <DashboardMetric label="Класс" value={currentClass.ru} />
+                <DashboardMetric label="Уровень" value={wizard.level} />
+                <DashboardMetric label="Режим" value={wizard.hpMode === "random" ? "d12" : "Фикс."} />
+                <DashboardMetric label="HP итог" value={wizard.hpPreview} />
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => onRollHitPoints()}
+                className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2 text-sm ${
                   wizard.hpMode === "random"
                     ? "bg-gradient-to-r from-amber-500 to-red-700 text-white"
                     : "border border-white/10 bg-white/5 text-stone-300"
                 }`}
               >
-              Случайно (симуляция бросков)
+                <Dices className="h-4 w-4" />
+                Случайно: d12 по уровням
               </button>
               <button
-                onClick={() => onUpdate({ hpMode: "fixed" })}
+                onClick={() => onUpdate({ hpMode: "fixed", hpRolls: [] })}
                 className={`rounded-2xl px-4 py-2 text-sm ${
                   wizard.hpMode === "fixed"
                     ? "bg-gradient-to-r from-amber-500 to-red-700 text-white"
                     : "border border-white/10 bg-white/5 text-stone-300"
                 }`}
               >
-              Фиксированное значение
+                Фиксированное значение
               </button>
             </div>
+            {wizard.hpMode === "random" ? (
+              <div className="mt-4 rounded-[22px] border border-white/10 bg-white/5 p-4">
+                <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Броски по уровням</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {wizard.hpRolls.map((roll, index) => (
+                    <Tag key={`${roll}-${index}`} tone="warm">
+                      Ур. {index + 1}: {roll}
+                    </Tag>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 rounded-[22px] border border-white/10 bg-white/5 p-4 text-sm text-stone-300">
+                Фиксированное значение рассчитывается как {wizard.level} × {currentClass.fixedHp} с учётом модификатора Телосложения.
+              </div>
+            )}
           </div>
         </div>
       ) : null}
@@ -2562,7 +3693,13 @@ function CharacterWizardModal({
               {BACKGROUND_PRESETS.map((preset) => (
                 <button
                   key={preset}
-                  onClick={() => onUpdate({ backgroundPreset: preset, generatedStory: preset })}
+                  onClick={() =>
+                    onUpdate({
+                      backgroundPreset: preset,
+                      generatedStory: preset,
+                      backgroundDetails: buildMockAiBackground(preset, preset),
+                    })
+                  }
                   className={`rounded-[24px] border p-4 text-left ${
                     wizard.backgroundPreset === preset
                       ? "border-amber-400/20 bg-amber-500/10"
@@ -2582,7 +3719,10 @@ function CharacterWizardModal({
             />
           )}
           <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
-            <p className="text-xs uppercase tracking-[0.24em] text-stone-500">Генератор истории</p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs uppercase tracking-[0.24em] text-stone-500">AI-style генератор истории</p>
+              <Tag tone="warm">Mock AI</Tag>
+            </div>
             <textarea
               rows="3"
               value={wizard.backgroundPrompt}
@@ -2597,6 +3737,19 @@ function CharacterWizardModal({
               <WandSparkles className="h-4 w-4" />
               Сгенерировать историю
             </button>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              {[
+                { label: "Истоки", value: wizard.backgroundDetails?.origin },
+                { label: "Перелом", value: wizard.backgroundDetails?.fracture },
+                { label: "Движущая сила", value: wizard.backgroundDetails?.drive },
+                { label: "Крючок", value: wizard.backgroundDetails?.hook },
+              ].map((item) => (
+                <div key={item.label} className="rounded-[22px] border border-white/10 bg-white/5 p-4">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-stone-500">{item.label}</p>
+                  <p className="mt-2 text-sm leading-6 text-stone-300">{item.value}</p>
+                </div>
+              ))}
+            </div>
             <div className="mt-4 rounded-[22px] border border-white/10 bg-white/5 p-4 text-sm leading-7 text-stone-300">
               {wizard.generatedStory}
             </div>
@@ -2681,9 +3834,11 @@ function EntityCard({ title, items }) {
 
 function DashboardMetric({ label, value }) {
   return (
-    <div className="min-w-0 rounded-[22px] border border-white/10 bg-black/20 px-4 py-4">
+    <div className="min-w-0 overflow-hidden rounded-[22px] border border-white/10 bg-black/20 px-4 py-4">
       <p className="text-[11px] uppercase tracking-[0.24em] text-stone-500">{label}</p>
-      <p className="mt-2 break-words text-xl font-semibold text-stone-100">{value}</p>
+      <p className="mt-2 break-words text-base font-semibold leading-6 text-stone-100 sm:text-lg">
+        {value}
+      </p>
     </div>
   );
 }
